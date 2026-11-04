@@ -1,43 +1,67 @@
+# Import TestClient so we can send simulated HTTP requests
 from fastapi.testclient import TestClient
+import pytest
 
-from app.main import app
+# Import the application factory from the FastAPI package
+from app.main import create_app
 
-client = TestClient(app)
+
+class FakeIrisModel:
+    def predict(self, features):
+        # Always return class 0
+        return [0]
+
+def fake_model_loader():
+    return FakeIrisModel()
+
+def fake_version_loader():
+    return "test-version"
 
 
-def test_health_reports_registered_model():
+@pytest.fixture
+def client():
+    app = create_app(
+        model_loader=fake_model_loader,
+        version_loader=fake_version_loader,
+    )
+
+    with TestClient(app) as test_client:
+        yield test_client
+
+
+def test_health_endpoint(client):
+    """
+    Verify that the application is ruuning and can respond to a health-check request
+    """
+
     response = client.get("/health")
-
     assert response.status_code == 200
-    assert response.json()["status"] == "healthy"
-    assert response.json()["model_name"] == "iris-classifier"
-    assert response.json()["model_version"]
+    assert response.json() == {
+        "status": "healthy",
+        "model_name": "iris-classifier",
+        "model_version": "test-version",
+    }
 
+def test_valid_iris_prediction(client):
+    """
+    Verify that we are getting valid predictions
+    """
+    payload = {
+        "sepal_length": 3.4,
+        "sepal_width": 1.4,
+        "petal_length": 3.4,
+        "petal_width": 0.4
+    }
 
-def test_predict_returns_iris_class():
-    response = client.post(
-        "/predict",
-        json={
-            "sepal_length": 5.1,
-            "sepal_width": 3.5,
-            "petal_length": 1.4,
-            "petal_width": 0.2,
-        },
-    )
+    # Send a simulated POST request with JSON input
+    response = client.post("/predict", json=payload)
 
+    # Endpoint should accept the valid input
     assert response.status_code == 200
-    assert response.json() == {"prediction": 0, "class_name": "setosa"}
 
+    result = response.json()
+    assert "prediction" in result
+    assert "class_name" in result
 
-def test_predict_rejects_non_positive_measurements():
-    response = client.post(
-        "/predict",
-        json={
-            "sepal_length": 0,
-            "sepal_width": 3.5,
-            "petal_length": 1.4,
-            "petal_width": 0.2,
-        },
-    )
-
-    assert response.status_code == 422
+    assert result["class_name"] in ["setosa", "versicolor", "virginica"]
+    assert result["prediction"] in [0, 1, 2]

@@ -68,3 +68,35 @@ python -m pytest
 
 To use a remote MLflow tracking server, set `MLFLOW_TRACKING_URI` before
 running either the training pipeline or the API. Both use the same setting.
+
+## Build and run with Docker
+
+The existing local `iris-classification` experiment stores artifacts at a
+Windows-only file path, which a Linux container cannot read. Start MLflow with
+artifact proxying enabled and a new default artifact root. The new experiment
+created below will use that proxy:
+
+```powershell
+python -m mlflow server --backend-store-uri sqlite:///mlflow.db --default-artifact-root mlflow-artifacts:/ --artifacts-destination .\mlartifacts --host 0.0.0.0 --port 6001 --allowed-hosts "127.0.0.1:6001,localhost:6001,host.docker.internal:6001"
+```
+
+In another PowerShell window, point training at that server and train/register
+the model in a new experiment so its artifacts are available through the
+server to the container:
+
+```powershell
+$env:MLFLOW_TRACKING_URI = "http://127.0.0.1:6001"
+$env:MLFLOW_EXPERIMENT_NAME = "iris-classification-docker"
+python -m pipeline.train
+```
+
+Build the API image from the project root and run it connected to the host's
+MLflow server:
+
+```powershell
+docker build -t iris-ml-api-cs:v2 .
+docker run --rm -p 8000:8000 -e MLFLOW_TRACKING_URI=http://host.docker.internal:6001 iris-ml-api-cs:v2
+```
+
+The MLflow server must allow the listed host headers and serve the registered
+model's artifacts. The API is then available at <http://localhost:8000/health>.
